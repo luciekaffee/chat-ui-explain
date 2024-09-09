@@ -35,6 +35,10 @@
 	import UploadedFile from "./UploadedFile.svelte";
 	import { useSettingsStore } from "$lib/stores/settings";
 	import type { ToolFront } from "$lib/types/Tool";
+	/* Lucie:
+	 * import popup -- was this me?
+	 */
+	import Popup from "./Popup.svelte";
 
 	export let messages: Message[] = [];
 	export let loading = false;
@@ -51,6 +55,8 @@
 
 	let loginModalOpen = false;
 	let message: string;
+	let showPopup = false;
+	let popupMessage = '';
 	let timeout: ReturnType<typeof setTimeout>;
 	let isSharedRecently = false;
 	$: $page.params.id && (isSharedRecently = false);
@@ -63,10 +69,38 @@
 		continue: { id: Message["id"] };
 	}>();
 
+	/** Lucie:
+	 * Create the popup messages based on the user input.
+	 */
+	 const createPopupMessage = (msg) => {
+		if (msg.toLowerCase().includes('what is')) {
+		return 'This is a factual question. The model will provide answers based on the data it is trained on and look up information on the web. '
+		+ 'When asking factual questions, it is important to remember that language models can make factural mistakes, as they are '
+		+ 'generating answers based on generalising the training data, often called hallucinations.';
+		} else if (msg.toLowerCase().includes('help')) {
+		return 'You have requested assistance. Please be aware that you are interacting with a language model, not a human. ' 
+		+ 'Although the chatbot can sound like a human, it is important to keep its limited capabilities in mind. '
+		+ 'For urgent help or support, please turn to the appropriate person.';
+		} else {
+		return `Your question to the chatbot is really this one? "${msg}"`;
+		}
+ 	 };
+
+	/* Lucie:
+	* handles the submit of user message, message here is the message sumitted to the LLM
+	*/
 	const handleSubmit = () => {
 		if (loading) return;
 		dispatch("message", message);
+	    // Set the pop-up message and show it
+		popupMessage = createPopupMessage(message);
+		showPopup = true;
 		message = "";
+
+		// Hide the pop-up after a short delay (e.g., 3 seconds)
+		setTimeout(() => {
+			showPopup = false;
+		}, 6000);
 	};
 
 	let lastTarget: EventTarget | null = null;
@@ -108,55 +142,6 @@
 
 	const convTreeStore = useConvTreeStore();
 
-	const updateCurrentIndex = () => {
-		const url = new URL($page.url);
-		let leafId = url.searchParams.get("leafId");
-
-		// Ensure the function is only run in the browser.
-		if (!browser) return;
-
-		if (leafId) {
-			// Remove the 'leafId' from the URL to clean up after retrieving it.
-			url.searchParams.delete("leafId");
-			history.replaceState(null, "", url.toString());
-		} else {
-			// Retrieve the 'leafId' from localStorage if it's not in the URL.
-			leafId = localStorage.getItem("leafId");
-		}
-
-		// If a 'leafId' exists, find the corresponding message and update indices.
-		if (leafId) {
-			let leafMessage = messages.find((m) => m.id == leafId);
-			if (!leafMessage?.ancestors) return; // Exit if the message has no ancestors.
-
-			let ancestors = leafMessage.ancestors;
-
-			// Loop through all ancestors to update the current child index.
-			for (let i = 0; i < ancestors.length; i++) {
-				let curMessage = messages.find((m) => m.id == ancestors[i]);
-				if (curMessage?.children) {
-					for (let j = 0; j < curMessage.children.length; j++) {
-						// Check if the current message's child matches the next ancestor
-						// or the leaf itself, and update the currentChildIndex accordingly.
-						if (i + 1 < ancestors.length) {
-							if (curMessage.children[j] == ancestors[i + 1]) {
-								curMessage.currentChildIndex = j;
-								break;
-							}
-						} else {
-							if (curMessage.children[j] == leafId) {
-								curMessage.currentChildIndex = j;
-								break;
-							}
-						}
-					}
-				}
-			}
-		}
-	};
-
-	updateCurrentIndex();
-
 	$: lastMessage = browser && (messages.find((m) => m.id == $convTreeStore.leaf) as Message);
 	$: lastIsError =
 		lastMessage &&
@@ -169,10 +154,6 @@
 	);
 
 	function onShare() {
-		if (!confirm("Are you sure you want to share this conversation? This cannot be undone.")) {
-			return;
-		}
-
 		dispatch("share");
 		isSharedRecently = true;
 		if (timeout) {
@@ -204,8 +185,8 @@
 	const settings = useSettingsStore();
 
 	// active tools are all the checked tools, either from settings or on by default
-	$: activeTools = $page.data.tools.filter((tool: ToolFront) =>
-		$settings?.tools?.includes(tool._id)
+	$: activeTools = $page.data.tools.filter(
+		(tool: ToolFront) => $settings?.tools?.[tool.name] ?? tool.isOnByDefault
 	);
 	$: activeMimeTypes = [
 		...(!$page.data?.assistant && currentModel.tools
@@ -267,7 +248,7 @@
 			{/if}
 
 			{#if messages.length > 0}
-				<div class="flex h-max flex-col gap-8 pb-52">
+				<div class="flex h-max flex-col gap-6 pb-52 2xl:gap-7">
 					<ChatMessage
 						{loading}
 						{messages}
@@ -330,7 +311,7 @@
 		/>
 	</div>
 	<div
-		class="dark:via-gray-80 pointer-events-none absolute inset-x-0 bottom-0 z-0 mx-auto flex w-full max-w-3xl flex-col items-center justify-center bg-gradient-to-t from-white via-white/80 to-white/0 px-3.5 py-4 dark:border-gray-800 dark:from-gray-900 dark:to-gray-900/0 max-md:border-t max-md:bg-white max-md:dark:bg-gray-900 sm:px-5 md:py-8 xl:max-w-4xl [&>*]:pointer-events-auto"
+		class="dark:via-gray-80 pointer-events-none absolute inset-x-0 bottom-0 z-0 mx-auto flex w-full max-w-3xl flex-col items-center justify-center bg-gradient-to-t from-white via-white/80 to-white/0 px-3.5 py-4 max-md:border-t max-md:bg-white sm:px-5 md:py-8 xl:max-w-4xl dark:border-gray-800 dark:from-gray-900 dark:to-gray-900/0 max-md:dark:bg-gray-900 [&>*]:pointer-events-auto"
 	>
 		{#if sources?.length}
 			<div class="flex flex-row flex-wrap justify-center gap-2.5 max-md:pb-3">
@@ -393,7 +374,7 @@
 				aria-label={isFileUploadEnabled ? "file dropzone" : undefined}
 				on:submit|preventDefault={handleSubmit}
 				class="relative flex w-full max-w-4xl flex-1 items-center rounded-xl border bg-gray-100 focus-within:border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:focus-within:border-gray-500
-            {isReadOnly ? 'opacity-30' : ''}"
+			{isReadOnly ? 'opacity-30' : ''}"
 			>
 				{#if onDrag && isFileUploadEnabled}
 					<FileDropzone bind:files bind:onDrag mimeTypes={activeMimeTypes} />
@@ -422,19 +403,19 @@
 
 						{#if loading}
 							<button
-								class="btn mx-1 my-1 inline-block h-[2.4rem] self-end rounded-lg bg-transparent p-1 px-[0.7rem] text-gray-400 enabled:hover:text-gray-700 disabled:opacity-60 enabled:dark:hover:text-gray-100 dark:disabled:opacity-40 md:hidden"
+								class="btn mx-1 my-1 inline-block h-[2.4rem] self-end rounded-lg bg-transparent p-1 px-[0.7rem] text-gray-400 disabled:opacity-60 enabled:hover:text-gray-700 md:hidden dark:disabled:opacity-40 enabled:dark:hover:text-gray-100"
 								on:click={() => dispatch("stop")}
 							>
 								<CarbonStopFilledAlt />
 							</button>
 							<div
-								class="mx-1 my-1 hidden h-[2.4rem] items-center p-1 px-[0.7rem] text-gray-400 enabled:hover:text-gray-700 disabled:opacity-60 enabled:dark:hover:text-gray-100 dark:disabled:opacity-40 md:flex"
+								class="mx-1 my-1 hidden h-[2.4rem] items-center p-1 px-[0.7rem] text-gray-400 disabled:opacity-60 enabled:hover:text-gray-700 md:flex dark:disabled:opacity-40 enabled:dark:hover:text-gray-100"
 							>
 								<EosIconsLoading />
 							</div>
 						{:else}
 							<button
-								class="btn mx-1 my-1 h-[2.4rem] self-end rounded-lg bg-transparent p-1 px-[0.7rem] text-gray-400 enabled:hover:text-gray-700 disabled:opacity-60 enabled:dark:hover:text-gray-100 dark:disabled:opacity-40"
+								class="btn mx-1 my-1 h-[2.4rem] self-end rounded-lg bg-transparent p-1 px-[0.7rem] text-gray-400 disabled:opacity-60 enabled:hover:text-gray-700 dark:disabled:opacity-40 enabled:dark:hover:text-gray-100"
 								disabled={!message || isReadOnly}
 								type="submit"
 							>
@@ -444,6 +425,9 @@
 					</div>
 				{/if}
 			</form>
+			{#if showPopup}
+  				<Popup message={popupMessage} />
+			{/if}
 			<div
 				class="mt-2 flex justify-between self-stretch px-1 text-xs text-gray-400/90 max-md:mb-2 max-sm:gap-2"
 			>
